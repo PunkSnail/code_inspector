@@ -114,7 +114,7 @@ static bool is_invalid_param(const char *code_path)
     }
     result = false;
 
-	return result;
+    return result;
 }
 
 static int load_code_file(const char *open_path, code_inspector_t *p_coder)
@@ -137,8 +137,7 @@ static int load_code_file(const char *open_path, code_inspector_t *p_coder)
     fb.close();
 
     result = 0;
-
-	return result;
+    return result;
 }
 
 /* when using functions of the string class,
@@ -253,24 +252,23 @@ static bool match_assign_range(list <pair<uint32_t, uint32_t>> &range_list,
 
 static bool reg_judge_format(const char *pattern, const char *source)
 {
-	bool result = false;
+    bool result = false;
 
-	regex_t regex;
-
+    regex_t regex;
     memset(&regex, 0, sizeof(regex_t));
 
-    if(regcomp(&regex, pattern, REG_EXTENDED) != 0) 
+    if (regcomp(&regex, pattern, REG_EXTENDED) != 0)
     {
         show_red("regcomp error: %s\n", pattern);
-		return result;
+        return result;
     }
-	if(regexec(&regex, source, 0, NULL, 0) == 0)
+    if (regexec(&regex, source, 0, NULL, 0) == 0)
     {
-		result = true;
-	}
-	regfree(&regex);
-
-	return result;
+        result = true;
+    }
+    regfree(&regex);
+    
+    return result;
 }
 
 static bool filter_multi_flow(string *p_line, 
@@ -705,7 +703,6 @@ int code_inspector_input(const char *code_path)
 {
     int result = -1;
     code_inspector_t *p_coder = NULL;
-
 
     if (is_invalid_param(code_path)) {
         goto done;
