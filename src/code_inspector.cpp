@@ -38,9 +38,10 @@ using namespace std;
     printf("\033[1;32;1m" fmt "\033[m",  ##args); \
 }
 
+/* don't care about capital (c >='A' && c <= 'Z') */
 #define IS_VAR(c) \
-    ((c >= 'a' && c <= 'z') || (c >='A' && c <= 'Z') || c == '_') ? \
-    true : false
+    (((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') ? \
+     true : false)
 
 
 typedef struct
@@ -67,6 +68,7 @@ public:
     code_inspector_t();
     ~code_inspector_t();
 
+    bool is_perfect_match;
     vector <string> code_vec;
     vector <string> format_code_vec;
 
@@ -80,6 +82,7 @@ public:
 
 code_inspector_t::code_inspector_t()
 {
+    this->is_perfect_match = false;
     /* align index and line number */
     this->code_vec.push_back("stub");
 }
@@ -192,6 +195,20 @@ static void ignore_comments(string *p_line, bool *p_comment_judge,
     }
 }
 
+/* ignore unassigned variables */
+static void ignore_unassigned(string *p_line, bool is_unassigned)
+{
+    if (is_unassigned && !p_line->empty()
+        && p_line->compare(0, 4, "goto")
+        && p_line->compare(0, 4, "else")
+        && p_line->compare(0, 5, "break")
+        && p_line->compare(0, 6, "return")
+        && p_line->compare(0, 8, "continue"))
+    {
+        p_line->clear();
+    }
+}
+
 static void ignore_special(string *p_line, 
                            const char **ignore_arr, uint32_t arr_len)
 {
@@ -208,28 +225,49 @@ static void ignore_special(string *p_line,
 static void format_code_string(vector<string> &format_code_vec)
 {
     string *p_line;
+    size_t i;
+    bool is_unassigned;
+
     bool comment_judge = false;
     bool macro_judge = false;
     int if_count = 0;   /* between #if 0  and #endif */
 
-    for (size_t line_no = 1; line_no < format_code_vec.size(); line_no++)
+    for (size_t line_no = 1; line_no < format_code_vec.size() - 1; line_no++)
     {
         p_line = &format_code_vec[line_no];
+        is_unassigned = true;
+re_loop:
         /* must remove spaces first */
-        for (size_t i = 0; i < p_line->size(); )
+        for (i = 0; i < p_line->size(); )
         {
-            if (' ' == p_line->c_str()[i] || 
-                ';' == p_line->c_str()[i]) 
+            char ch = p_line->c_str()[i];
+
+            if (' ' ==  ch || ';' == ch)
             {
                 p_line->erase(i, 1);
+                continue;
             }
-            else {
-                i++;
+            if (is_unassigned && !IS_VAR(ch) && ',' != ch && '*' != ch)
+            {
+                is_unassigned = false;
             }
+            i++;
+        }
+        /* end whit '=', merge next line */
+        if (i && '=' == p_line->c_str()[i - 1])
+        {
+            *p_line += format_code_vec[line_no + 1];
+            format_code_vec[line_no + 1].clear();
+
+            goto re_loop;
         }
         ignore_comments(p_line, &comment_judge, &macro_judge, &if_count);
+
+        ignore_unassigned(p_line, is_unassigned);
+
         ignore_special(p_line, g_ignore_arr, 
                        sizeof(g_ignore_arr) / sizeof(char*));
+
         //cout << *p_line << endl;
     }
 }
@@ -339,8 +377,8 @@ static void deal_with_line(code_inspector_t *p_coder,
             p_h->m_left = p_h->m_right = 0;
         }
         else {
-            show_red("invalid start line: %u:%s\n", 
-                     i, p_coder->code_vec[i].c_str());
+            /* show_red("invalid start line: %u:%s\n", */
+            /*          i, p_coder->code_vec[i].c_str()); */
         }
     }
     /* single process */
@@ -441,14 +479,16 @@ static void replace_zore(string *p_line, int no)
 {
     for (size_t i = 1; i < p_line->size(); i++)
     {
-        if ('0' == p_line->c_str()[i] && IS_VAR(p_line->c_str()[i - 1])) 
+        char ch = p_line->c_str()[i - 1];
+
+        if ('0' == p_line->c_str()[i] && IS_VAR(ch))
         {
             p_line->replace(i, 1, to_string(no));
         }
     }
 }
 
-static void replace_str_num(string *p_line, const char ch, int no)
+static void replace_num(string *p_line, const char ch, int no)
 {
     for (size_t i = 1; i < p_line->size(); i++)
     {
@@ -472,7 +512,7 @@ static void multi_stitch(string *p_line,
     }
 }
 
-/*  match "type_t x0;" with "type_t xn;" */
+/*  match "x0[n];" with "xn[n];" */
 static bool match_multi_line(string *single, 
                              string *multi, int multi_no)
 {
@@ -485,8 +525,14 @@ static bool match_multi_line(string *single,
     for (int i = 1; i < multi_no; i++)
     {
         middle = *single;
-        replace_zore(&middle, i);
 
+        if (multi->find('0') != string::npos)
+        {
+            replace_zore(&middle, i);
+        }
+        else {
+            replace_num(&middle, '0', i);
+        }
         if (multi->compare(middle) == 0) 
         {
             return true;
@@ -494,6 +540,7 @@ static bool match_multi_line(string *single,
     }
     return false;
 }
+
 /*  match "type_t x0, x1;" with "type_t x0;" */
 static bool match_multi_var(string *single, 
                             string *multi, int multi_no)
@@ -575,7 +622,7 @@ static bool match_multi_calc(string *single, string *multi, int multi_no)
     }
     middle = *single;
 
-    replace_str_num(&middle, '1', multi_no);
+    replace_num(&middle, '1', multi_no);
     if (multi->compare(0, middle.size(), middle.c_str()) == 0)
     {
         return true;
@@ -637,6 +684,7 @@ static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
         }
         if (false == is_match)
         {
+            p_coder->is_perfect_match = false;
             show_red("%u%s\n", i, p_coder->code_vec[i].c_str());
         }
         i++;
@@ -665,6 +713,8 @@ static void code_flow_analysis(code_inspector_t *p_coder)
         {
             start_line = map_it->second.multi_arr[i];
 
+            p_coder->is_perfect_match = true;
+
             for (multi_it = multi_list.begin(); 
                  start_line && multi_it != multi_list.end(); multi_it++)
             {
@@ -674,6 +724,10 @@ static void code_flow_analysis(code_inspector_t *p_coder)
                 show("MULTI FLOW %d START %u\n", g_multi_no_arr[i], start_line);
 
                 compare_with_single(p_coder, (multi_type_t)i, *single_it, *multi_it);
+
+                if (p_coder->is_perfect_match)
+                    show_green("\tis perfect match\n");
+
                 break;
             }
         }
