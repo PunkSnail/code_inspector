@@ -10,7 +10,7 @@ extern "C" {
 #define MAXIMUM_FILE_SIZE   10485760
 
 __attribute__((unused))
-static const int g_multi_no_arr[] = { 
+static const int g_multi_num_arr[] = {
     2, 4, 8, 16
 };
 
