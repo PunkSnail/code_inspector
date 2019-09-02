@@ -23,10 +23,7 @@ using namespace std;
 #define NORMAL_PROCESS_REG      "while\\(."
 #define SINGLE_PROCESS_REG      "while\\(.+.&&.+>0\\)"
 
-#define show(...) \
-{ \
-    printf(__VA_ARGS__); \
-}
+#define show(...) printf(__VA_ARGS__);
 
 #define show_red(fmt, args...) \
 { \
@@ -44,8 +41,7 @@ using namespace std;
      true : false)
 
 #define IN_ALPHABET(c) \
-    (((c >= 'a' && c <= 'z') || (c >='A' && c <= 'Z') || c == '_') ? \
-     true : false)
+    (((c >= 'a' && c <= 'z') || (c >='A' && c <= 'Z')) ? true : false)
 
 
 typedef struct
@@ -246,7 +242,7 @@ re_loop:
         {
             char ch = p_line->c_str()[i];
 
-            if (' ' ==  ch || ';' == ch)
+            if (' ' ==  ch || ';' == ch || '\r' == ch || '\n' == ch)
             {
                 p_line->erase(i, 1);
                 continue;
@@ -274,8 +270,6 @@ re_loop:
 
         ignore_special(p_line, g_ignore_arr, 
                        sizeof(g_ignore_arr) / sizeof(char*));
-
-        //cout << *p_line << endl;
     }
 }
 
@@ -382,10 +376,6 @@ static void deal_with_line(code_inspector_t *p_coder,
             multi_list.push_back(make_pair(i, 0));
             p_h->multi_start = i;
             p_h->m_left = p_h->m_right = 0;
-        }
-        else {
-            /* show_red("invalid start line: %u:%s\n", */
-            /*          i, p_coder->code_vec[i].c_str()); */
         }
     }
     /* single process */
