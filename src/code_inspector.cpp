@@ -46,7 +46,7 @@ using namespace std;
 
 typedef struct
 {
-    uint32_t multi_arr[MULTI_FLOW_ARR_SIZE];
+    uint32_t arr[MULTI_FLOW_ARR_SIZE];
 
 }multi_start_t;
 
@@ -68,6 +68,8 @@ public:
     code_inspector_t();
     ~code_inspector_t();
 
+    void clear_match_counts(void);
+
     bool is_perfect_match;
     vector <string> code_vec;
     vector <string> format_code_vec;
@@ -78,6 +80,10 @@ public:
 
     /* multi start related to single single */
     map <uint32_t, multi_start_t> related_map; 
+
+    /* used to record match counts */
+    uint32_t *match_counts;
+    uint32_t arr_size;
 };
 
 code_inspector_t::code_inspector_t()
@@ -85,9 +91,25 @@ code_inspector_t::code_inspector_t()
     this->is_perfect_match = false;
     /* align index and line number */
     this->code_vec.push_back("stub");
+
+    this->match_counts = NULL;
+    this->arr_size = 0;
 }
 
-code_inspector_t::~code_inspector_t() {  }
+code_inspector_t::~code_inspector_t()
+{
+    if (this->match_counts)
+    {
+        delete this->match_counts;
+        this->match_counts = NULL;
+        this->arr_size = 0;
+    }
+}
+
+void code_inspector_t::clear_match_counts(void)
+{
+    memset(this->match_counts, 0, this->arr_size * sizeof(uint32_t));
+}
 
 static bool is_invalid_param(const char *code_path)
 {
@@ -232,6 +254,7 @@ static void format_code_string(vector<string> &format_code_vec)
     bool macro_judge = false;
     int if_count = 0;   /* between #if 0  and #endif */
 
+    /* "line_no + 1" exists inside the loop, so here size() - 1 */
     for (size_t line_no = 1; line_no < format_code_vec.size() - 1; line_no++)
     {
         p_line = &format_code_vec[line_no];
@@ -253,7 +276,7 @@ re_loop:
             }
             i++;
         }
-        /* end whit '=', merge next line */
+        /* end whit '=' or can't find match ')',  merge next line */
         if (i && ('=' == p_line->c_str()[i - 1] ||
                   (p_line->find('(') != string::npos
                    && p_line->find(')') == string::npos)))
@@ -310,25 +333,24 @@ static bool reg_judge_format(const char *pattern, const char *source)
     return result;
 }
 
-static bool filter_multi_flow(string *p_line, 
-                              uint32_t line_no, uint32_t *multi_arr)
+static bool filter_multi_flow(string *p_line, uint32_t line_no, uint32_t *arr)
 {
     /* the order is important */
     if (p_line->find('2') != string::npos)
     {
-        multi_arr[MULTI_FLOW_2] = line_no;
+        arr[MULTI_FLOW_2] = line_no;
     }
     else if (p_line->find('4') != string::npos)
     {
-        multi_arr[MULTI_FLOW_4] = line_no;
+        arr[MULTI_FLOW_4] = line_no;
     }
     else if (p_line->find('8') != string::npos)
     {
-        multi_arr[MULTI_FLOW_8] = line_no;
+        arr[MULTI_FLOW_8] = line_no;
     }
     else if (p_line->find("16") != string::npos)
     {
-        multi_arr[MULTI_FLOW_16] = line_no;
+        arr[MULTI_FLOW_16] = line_no;
     }
     else {
         return false;
@@ -370,7 +392,7 @@ static void deal_with_line(code_inspector_t *p_coder,
     /* multiple process */
     if (p_line->find('0') == string::npos)
     {
-        if (filter_multi_flow(p_line, i, p_h->multi_record.multi_arr))
+        if (filter_multi_flow(p_line, i, p_h->multi_record.arr))
         {
             /* don't know the end line number yet */
             multi_list.push_back(make_pair(i, 0));
@@ -549,8 +571,7 @@ static bool drop_brackets(string *p_line)
 }
 
 /*  match "x0[n];" with "xn[n];" */
-static bool match_multi_line(string *single, 
-                             string *multi, int multi_num)
+static bool match_multi_line(string *single, string *multi, int multi_num)
 {
     string middle;
 
@@ -578,8 +599,7 @@ static bool match_multi_line(string *single,
 }
 
 /*  match "func(x0 & x1 & y0 & y1);" with "func(x0 & y0);" */
-static bool match_multi_var(string *single, 
-                            string *multi, int multi_num)
+static bool match_multi_var(string *single, string *multi, int multi_num)
 {
     bool result = false;
     
@@ -677,7 +697,7 @@ static bool match_multi_equal(string *single, string *multi)
     return false;
 }
 
-/* match "x += 1;" with "x += n;" */
+/* match "x += n;" with "x += 1;" */
 static bool match_multi_calc(string *single, string *multi, int multi_num)
 {
     bool result = false;
@@ -698,50 +718,43 @@ static bool match_multi_calc(string *single, string *multi, int multi_num)
     return result;
 }
 
+/* TODO: match "func_xn(a, b0, bn, c0, cn)" with "func_x1(a, b0, c0)" */
+
 static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
-                                pair<uint32_t, uint32_t> single_range, 
-                                pair<uint32_t, uint32_t> multi_range)
+                                pair<uint32_t, uint32_t> *s_range, 
+                                pair<uint32_t, uint32_t> *m_range)
 {
     string *single;
     string *multi;
-    vector <string> &format_code_vec = p_coder->format_code_vec;
-    /* +1 skip while line */
-    uint32_t single_idx = single_range.first + 1;
-
     bool is_match = false;
     int multi_num = g_multi_num_arr[type];
 
-    for (uint32_t i = multi_range.first + 1; i < multi_range.second; i++)
+    /* range start +1 skip the "while" line */
+    for (uint32_t i = m_range->first + 1; i < m_range->second; i++)
     {
-        multi = &format_code_vec[i];
+        multi = &p_coder->format_code_vec[i];
         /* ignore empty line or symbol */
         if (multi->size() < 2) {
             continue;
         }
-        for (uint32_t j = single_idx; j < single_range.second && !is_match; j++)
+        for (uint32_t j = s_range->first + 1; j < s_range->second; j++)
         {
-            single = &format_code_vec[j];
+            single = &p_coder->format_code_vec[j];
 
-            if (single->size() < 2 || multi->size() < single->size()) {
+            /* this line has been matched multiple times or invalid length */
+            if (p_coder->match_counts[j] >= (uint32_t)multi_num 
+                || single->size() < 2 || multi->size() < single->size())
+            {
                 continue;
             }
-            if (match_multi_line(single, multi, multi_num))
+            if (match_multi_line(single, multi, multi_num)
+                || match_multi_var(single, multi, multi_num)
+                || match_multi_equal(single, multi)
+                || match_multi_calc(single, multi, multi_num))
             {
                 is_match = true;
-            }
-            else if (match_multi_var(single, multi, multi_num))
-            {
-                is_match = true;
-                single_idx++;
-            }
-            else if (match_multi_equal(single, multi))
-            {
-                is_match = true;
-                single_idx++;
-            }
-            else if (match_multi_calc(single, multi, multi_num))
-            {
-                is_match = true;
+                p_coder->match_counts[j]++;
+                break;
             }
         }
         if (false == is_match)
@@ -753,46 +766,52 @@ static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
     }
 }
 
+static void pick_multi_to_compare(code_inspector_t *p_coder, 
+                                  multi_type_t type, uint32_t start, 
+                                  pair<uint32_t, uint32_t> *s_range)
+{
+    list <pair<uint32_t, uint32_t>>::iterator multi_it;
+
+    for (multi_it = p_coder->multi_list.begin(); 
+         start && multi_it != p_coder->multi_list.end(); multi_it++)
+    {
+        if (multi_it->first != start) {
+            continue;
+        }
+        show("MULTI FLOW %d START %u\n", g_multi_num_arr[type], start);
+        p_coder->clear_match_counts();
+
+        compare_with_single(p_coder, type, s_range, &(*multi_it));
+
+        if (p_coder->is_perfect_match)
+        {
+            show_green("\tis perfect match\n");
+        }
+        /* XXX: Now I know which lines in the single process don't match, 
+         * maybe try to do something */
+        break;
+    }
+}
+
 static void code_flow_analysis(code_inspector_t *p_coder)
 {
     list <pair<uint32_t, uint32_t>>::iterator single_it;
-    list <pair<uint32_t, uint32_t>>::iterator multi_it;
 
-    list <pair<uint32_t, uint32_t>> &single_list = p_coder->single_list;
-    list <pair<uint32_t, uint32_t>> &multi_list = p_coder->multi_list;
-
-    uint32_t start_line = 0;
     map <uint32_t, multi_start_t>::iterator map_it;
 
-    single_it = single_list.begin();
+    single_it = p_coder->single_list.begin();
 
-    while (single_it != single_list.end())
+    for (; single_it != p_coder->single_list.end(); single_it++)
     {
         map_it = p_coder->related_map.find(single_it->first);
 
         for (int i = 0; i < MULTI_FLOW_ARR_SIZE; i++)
         {
-            start_line = map_it->second.multi_arr[i];
-
             p_coder->is_perfect_match = true;
 
-            for (multi_it = multi_list.begin(); 
-                 start_line && multi_it != multi_list.end(); multi_it++)
-            {
-                if (multi_it->first != start_line) {
-                    continue;
-                }
-                show("MULTI FLOW %d START %u\n", g_multi_num_arr[i], start_line);
-
-                compare_with_single(p_coder, (multi_type_t)i, *single_it, *multi_it);
-
-                if (p_coder->is_perfect_match) {
-                    show_green("\tis perfect match\n");
-                }
-                break;
-            }
+            pick_multi_to_compare(p_coder, (multi_type_t)i, 
+                                  map_it->second.arr[i], &(*single_it));
         }
-        single_it++;
     }
 }
 
@@ -802,7 +821,7 @@ static int inspector_start_work(code_inspector_t *p_coder)
     p_coder->format_code_vec = p_coder->code_vec;
     
     format_code_string(p_coder->format_code_vec);
-    
+
     result = find_key_lines(p_coder);
 
     if (0 != result)
@@ -832,6 +851,11 @@ int code_inspector_input(const char *code_path)
         show_red("error reading file into memory: %s\n", strerror(errno));
         goto done;
     }
+    p_coder->arr_size = (uint32_t)p_coder->code_vec.size();
+    p_coder->match_counts = new uint32_t[p_coder->arr_size];
+
+    p_coder->clear_match_counts();
+
     result = inspector_start_work(p_coder);
 done:
     if (p_coder)
