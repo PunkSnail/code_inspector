@@ -521,15 +521,18 @@ static void replace_var_zore(string *p_line, int no)
     }
 }
 
-static void replace_num(string *p_line, const char ch, int no)
+static bool replace_num(string *p_line, const char ch, int no)
 {
+    bool result = false;
     for (size_t i = 1; i < p_line->size(); i++)
     {
         if (ch == p_line->c_str()[i]) 
         {
+            result = true;
             p_line->replace(i, 1, to_string(no));
         }
     }
+    return result;
 }
 
 static void multi_stitch(string *p_line, 
@@ -545,52 +548,27 @@ static void multi_stitch(string *p_line,
     }
 }
 
-static bool drop_brackets(string *p_line)
-{
-    size_t found;
-
-    found = p_line->rfind('(');
-
-    if (found == string::npos)
-    {
-        return false;
-    }
-    else {
-        *p_line = p_line->c_str() + found + 1;
-    }
-    found = p_line->find(')');
-
-    if (found == string::npos)
-    {
-        return false;
-    }
-    else {
-        p_line->assign(p_line->c_str(), found);
-    }
-    return true;
-}
-
 /*  match "x0[n];" with "xn[n];" */
-static bool match_multi_line(string *single, string *multi, int multi_num)
+static bool match_multi_line(string *single, string *multi, int n)
 {
-    string middle;
+    string intrm;
 
     if (multi->compare(*single) == 0) 
     {
         return true;
     }
-    for (int i = 1; i < multi_num; i++)
+    for (int i = 1; i < n; i++)
     {
-        middle = *single;
+        intrm = *single;
 
         if (multi->find('0') != string::npos)
         {
-            replace_var_zore(&middle, i);
+            replace_var_zore(&intrm, i);
         }
         else {
-            replace_num(&middle, '0', i);
+            replace_num(&intrm, '0', i);
         }
-        if (multi->compare(middle) == 0) 
+        if (multi->compare(intrm) == 0)
         {
             return true;
         }
@@ -599,62 +577,59 @@ static bool match_multi_line(string *single, string *multi, int multi_num)
 }
 
 /*  match "func(x0 & x1 & y0 & y1);" with "func(x0 & y0);" */
-static bool match_multi_var(string *single, string *multi, int multi_num)
+static bool match_multi_var(string *single, string *multi, int n)
 {
     bool result = false;
-    
-    string var1, var2;
-    string middle;
-    string multi_copy;
-    size_t found;
+    string intrm, symbol, del;
+    size_t pos;
     char ch;
 
-    found = multi->rfind('(');
-    /* "MULTI_FLOW_16" case, need someone to check */
-    if (multi_num > 8 || single->find('0') == string::npos
-        || multi->find('0') == string::npos || found == string::npos)
-    {
-        return result;
-    }
-    middle = *single;
-    multi_copy = *multi;
-    if (strncmp(multi->c_str(), single->c_str(), found) != 0 ||
-        !drop_brackets(&middle) || !drop_brackets(&multi_copy))
-    {
-        return result;
-    }
-    for (size_t i = 1; i < multi_copy.size() - 1; i++)
-    {
-        ch = multi_copy.c_str()[i];
-        if (!IS_VAR(ch) && ch == multi_copy.c_str()[i + 1])
-        {
-            var1 = middle;
-            string tmp(2, ch);
-            multi_stitch(&middle, &var1, multi_num, tmp.c_str());
-            goto end_compare;
-        }
-    }
-    ch = '\0';
-    for (size_t i = 1; i < middle.size() - 1; i++)
-    {
-        if (!IS_VAR(middle.c_str()[i]))
-        {
-            ch = middle.c_str()[i];
+    intrm = *multi;
+    pos = multi->rfind('(');
 
-            var1.assign(middle.c_str(), i);
-            var2 = middle.c_str() + i + 1;
-            middle = var1;
-            break;
-        }
-    }
-    if ('\0' == ch) {
+    if (pos == string::npos)
+    {
         return result;
     }
-    multi_stitch(&middle, &var1, multi_num, &ch);
-    middle += (&ch + var2);
-    multi_stitch(&middle, &var2, multi_num, &ch);
-end_compare:
-    if (multi_copy.compare(middle) == 0)
+    for (size_t i = pos, j = 0; i < single->size() - 1; i++)
+    {
+        if ('0' != single->c_str()[i]) {
+            continue;
+        }
+        for (j = i; j > 1; j--)
+        {
+            if (!IS_VAR(single->c_str()[j]))
+            {
+                j++;
+                break;
+            }
+        }
+        for (size_t k = 1; i > j && k < (size_t)n; k++)
+        {
+            ch = multi->c_str()[i + 1];
+
+            if (symbol.empty() && 
+                !IS_VAR(ch) && ch == multi->c_str()[i + 2]) // such as "&&"
+            {
+                symbol.assign(multi->c_str() + i + 1, 2);
+            }
+            else if (symbol.empty() && !IS_VAR(ch)) // such as "&"
+            {
+                symbol.assign(multi->c_str() + i + 1, 1);
+            }
+            del = symbol;
+            del.append(single->c_str() + j, i - j);
+            del += to_string(k);
+
+            if (symbol.empty() || string::npos == (pos = intrm.find(del)))
+            {
+                return result;
+            }
+            intrm.erase(pos, del.size());
+            del.clear();
+        }
+    }
+    if (intrm.compare(*single) == 0)
     {
         result = true;
     }
@@ -662,35 +637,35 @@ end_compare:
 }
 
 /*  match "x0 = x1 = n;" with "x0 = n;" */
-static bool match_multi_equal(string *single, string *multi)
+static bool match_multi_equal(string *single, string *multi, int n)
 {
     int equal_count = 0;
 
     string base;
-    size_t base_len = 0;
-    string middle;
+    size_t offset = 0;
+    string intrm;
 
     for (size_t i = 0; i < multi->size(); i++)
     {
         if ('=' == multi->c_str()[i]) 
         {
-            if (0 == base_len) {
-                base_len = i;
+            if (0 == offset) {
+                offset = i;
             }
             equal_count++;
         }
     }
     if (equal_count > 1)
     {
-        base.assign(single->c_str(), base_len);
-        middle = base;
+        base.assign(single->c_str(), offset);
+        intrm = base;
     }
     else {
         return false;
     }
-    multi_stitch(&middle, &base, equal_count, "=");
+    multi_stitch(&intrm, &base, equal_count, "=");
 
-    if (multi->compare(0, middle.size(), middle.c_str()) == 0)
+    if (multi->compare(0, intrm.size(), intrm.c_str()) == 0)
     {
         return true;
     }
@@ -698,27 +673,67 @@ static bool match_multi_equal(string *single, string *multi)
 }
 
 /* match "x += n;" with "x += 1;" */
-static bool match_multi_calc(string *single, string *multi, int multi_num)
+static bool match_multi_calc(string *single, string *multi, int n)
 {
     bool result = false;
-    string middle;
+    string intrm;
     
     if (single->find("+=1") == string::npos &&
         single->find("-=1") == string::npos)
     {
         return result;
     }
-    middle = *single;
+    intrm = *single;
 
-    replace_num(&middle, '1', multi_num);
-    if (multi->compare(0, middle.size(), middle.c_str()) == 0)
+    replace_num(&intrm, '1', n);
+    if (multi->compare(0, intrm.size(), intrm.c_str()) == 0)
     {
         return true;
     }
     return result;
 }
 
-/* TODO: match "func_xn(a, b0, bn, c0, cn)" with "func_x1(a, b0, c0)" */
+/* match "func_xn(a, b0, bn, c0, cn)" with "func_x1(a, b0, c0)" */
+static bool match_multi_func(string *single, string *multi, int n)
+{
+    bool result = false;
+    string intrm, del;
+    size_t pos;
+
+    intrm = *multi;
+    if (false == replace_num(&intrm, to_string(n)[0], 1)) {
+        return result;
+    }
+    for (size_t i = 0, j = 0; i < single->size(); i++)
+    {
+        if ('0' != single->c_str()[i]) {
+            continue;
+        }
+        for (j = i; j > 1; j--)
+        {
+            //if (',' == single->c_str()[j]) {
+            if (!IS_VAR(single->c_str()[j])) {
+                break;
+            }
+        }
+        for (size_t k = 1; k < (size_t)n; k++)
+        {
+            del.assign(single->c_str() + j, i - j);
+            del += to_string(k);
+
+            if (string::npos == (pos = intrm.find(del)))
+            {
+                return result;
+            }
+            intrm.erase(pos, del.size());
+        }
+    }
+    if (intrm.compare(*single) == 0)
+    {
+        result = true;
+    }
+    return result;
+}
 
 static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
                                 pair<uint32_t, uint32_t> *s_range, 
@@ -727,7 +742,7 @@ static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
     string *single;
     string *multi;
     bool is_match = false;
-    int multi_num = g_multi_num_arr[type];
+    int n = g_multi_num_arr[type];
 
     /* range start +1 skip the "while" line */
     for (uint32_t i = m_range->first + 1; i < m_range->second; i++)
@@ -742,15 +757,16 @@ static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
             single = &p_coder->format_code_vec[j];
 
             /* this line has been matched multiple times or invalid length */
-            if (p_coder->match_counts[j] >= (uint32_t)multi_num 
+            if (p_coder->match_counts[j] >= (uint32_t)n 
                 || single->size() < 2 || multi->size() < single->size())
             {
                 continue;
             }
-            if (match_multi_line(single, multi, multi_num)
-                || match_multi_var(single, multi, multi_num)
-                || match_multi_equal(single, multi)
-                || match_multi_calc(single, multi, multi_num))
+            if (match_multi_line(single, multi, n)
+                || match_multi_var(single, multi, n)
+                || match_multi_equal(single, multi, n)
+                || match_multi_calc(single, multi, n)
+                || match_multi_func(single, multi, n))
             {
                 is_match = true;
                 p_coder->match_counts[j]++;
@@ -829,8 +845,8 @@ static int inspector_start_work(code_inspector_t *p_coder)
         return result;
     }
     code_flow_analysis(p_coder);
-
-	return result;
+    
+    return result;
 }
 
 int code_inspector_input(const char *code_path)
