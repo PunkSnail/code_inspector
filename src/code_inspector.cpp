@@ -68,7 +68,7 @@ public:
     code_inspector_t();
     ~code_inspector_t();
 
-    void clear_match_counts(void);
+    void clear_refers_arr(void);
 
     bool is_perfect_match;
     vector <string> code_vec;
@@ -81,8 +81,8 @@ public:
     /* multi start related to single single */
     map <uint32_t, multi_start_t> related_map; 
 
-    /* used to record match counts */
-    uint32_t *match_counts;
+    /* used to record match reference count */
+    uint32_t *refers_arr;
     uint32_t arr_size;
 };
 
@@ -92,23 +92,23 @@ code_inspector_t::code_inspector_t()
     /* align index and line number */
     this->code_vec.push_back("stub");
 
-    this->match_counts = NULL;
+    this->refers_arr = NULL;
     this->arr_size = 0;
 }
 
 code_inspector_t::~code_inspector_t()
 {
-    if (this->match_counts)
+    if (this->refers_arr)
     {
-        delete this->match_counts;
-        this->match_counts = NULL;
+        delete this->refers_arr;
+        this->refers_arr = NULL;
         this->arr_size = 0;
     }
 }
 
-void code_inspector_t::clear_match_counts(void)
+void code_inspector_t::clear_refers_arr(void)
 {
-    memset(this->match_counts, 0, this->arr_size * sizeof(uint32_t));
+    memset(this->refers_arr, 0, this->arr_size * sizeof(uint32_t));
 }
 
 static bool is_invalid_param(const char *code_path)
@@ -757,7 +757,7 @@ static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
             single = &p_coder->format_code_vec[j];
 
             /* this line has been matched multiple times or invalid length */
-            if (p_coder->match_counts[j] >= (uint32_t)n 
+            if (p_coder->refers_arr[j] >= (uint32_t)n 
                 || single->size() < 2 || multi->size() < single->size())
             {
                 continue;
@@ -769,7 +769,7 @@ static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
                 || match_multi_func(single, multi, n))
             {
                 is_match = true;
-                p_coder->match_counts[j]++;
+                p_coder->refers_arr[j]++;
                 break;
             }
         }
@@ -795,7 +795,7 @@ static void pick_multi_to_compare(code_inspector_t *p_coder,
             continue;
         }
         show("MULTI FLOW %d START %u\n", g_multi_num_arr[type], start);
-        p_coder->clear_match_counts();
+        p_coder->clear_refers_arr();
 
         compare_with_single(p_coder, type, s_range, &(*multi_it));
 
@@ -868,9 +868,9 @@ int code_inspector_input(const char *code_path)
         goto done;
     }
     p_coder->arr_size = (uint32_t)p_coder->code_vec.size();
-    p_coder->match_counts = new uint32_t[p_coder->arr_size];
+    p_coder->refers_arr = new uint32_t[p_coder->arr_size];
 
-    p_coder->clear_match_counts();
+    p_coder->clear_refers_arr();
 
     result = inspector_start_work(p_coder);
 done:
