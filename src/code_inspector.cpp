@@ -17,11 +17,12 @@
 #include <iostream>
 
 #include "code_inspector.h"
+#include "matching_helper.h"
 
 using namespace std;
 
+/* Don't care about spaces, the format function will remove them */
 #define NORMAL_PROCESS_REG      "while\\(."
-#define SINGLE_PROCESS_REG      "while\\(.+.&&.+>0\\)"
 
 #define show(...) printf(__VA_ARGS__);
 
@@ -35,14 +36,6 @@ using namespace std;
     printf("\033[1;32;1m" fmt "\033[m",  ##args); \
 }
 
-/* don't care about capital (c >='A' && c <= 'Z') */
-#define IS_VAR(c) \
-    (((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') ? \
-     true : false)
-
-#define IN_ALPHABET(c) \
-    (((c >= 'a' && c <= 'z') || (c >='A' && c <= 'Z')) ? true : false)
-
 
 typedef struct
 {
@@ -52,11 +45,11 @@ typedef struct
 
 typedef struct
 {
-    uint32_t single_start;
-    uint32_t multi_start;
-    uint32_t left;
-    uint32_t right;
+    uint32_t s_start;
+    uint32_t m_start;
+    uint32_t s_left;
     uint32_t m_left;
+    uint32_t s_right;
     uint32_t m_right;
     multi_start_t multi_record;
 
@@ -75,10 +68,10 @@ public:
     vector <string> format_code_vec;
 
     /* start and end line numbers */
-    list <pair<uint32_t, uint32_t>> single_list;
-    list <pair<uint32_t, uint32_t>> multi_list;
+    list <pair<uint32_t, uint32_t>> sr_list; /* single processing range */
+    list <pair<uint32_t, uint32_t>> mr_list; /* multi processing range */
 
-    /* multi start related to single single */
+    /* multi start related to single start */
     map <uint32_t, multi_start_t> related_map; 
 
     /* used to record match reference count */
@@ -134,7 +127,7 @@ static bool is_invalid_param(const char *code_path)
     }
     if (st.st_size > MAXIMUM_FILE_SIZE)
     {
-        show_red("code file too big, current limit: %ub\n", MAXIMUM_FILE_SIZE);
+        show_red("code file too big, current limit: %u\n", MAXIMUM_FILE_SIZE);
         return result;
     }
     result = false;
@@ -361,29 +354,29 @@ static bool filter_multi_flow(string *p_line, uint32_t line_no, uint32_t *arr)
 static void deal_with_line(code_inspector_t *p_coder, 
                            string *p_line, uint32_t i, loop_helper_t *p_h)
 {
-    list <pair<uint32_t, uint32_t>> &single_list = p_coder->single_list;
-    list <pair<uint32_t, uint32_t>> &multi_list = p_coder->multi_list;
+    list <pair<uint32_t, uint32_t>> &sr_list = p_coder->sr_list;
+    list <pair<uint32_t, uint32_t>> &mr_list = p_coder->mr_list;
 
     if (p_line->find('{') != string::npos)
     {
-        p_h->left++;
+        p_h->s_left++;
         p_h->m_left++;
     }
     if (p_line->find('}') != string::npos)
     {
-        p_h->right++;
+        p_h->s_right++;
         p_h->m_right++;
-        /* assign value to the end line number */
-        if (p_h->single_start && 0 == p_h->right - p_h->left)
-        {
-            match_assign_range(single_list, p_h->single_start, i);
-            p_h->single_start = 0;
-        }
-        else if (p_h->multi_start && 0 == p_h->m_right - p_h->m_left)
-        {
-            match_assign_range(multi_list, p_h->multi_start, i);
-            p_h->multi_start = 0;
-        }
+    }
+    /* assign value to the end line number */
+    if (p_h->s_start && p_h->s_right == p_h->s_left)
+    {
+        match_assign_range(sr_list, p_h->s_start, i);
+        p_h->s_start = 0;
+    }
+    if (p_h->m_start && p_h->m_right == p_h->m_left)
+    {
+        match_assign_range(mr_list, p_h->m_start, i);
+        p_h->m_start = 0;
     }
     if (false == reg_judge_format(NORMAL_PROCESS_REG, p_line->c_str()))
     {
@@ -395,25 +388,25 @@ static void deal_with_line(code_inspector_t *p_coder,
         if (filter_multi_flow(p_line, i, p_h->multi_record.arr))
         {
             /* don't know the end line number yet */
-            multi_list.push_back(make_pair(i, 0));
-            p_h->multi_start = i;
+            mr_list.push_back(make_pair(i, 0));
+            p_h->m_start = i;
             p_h->m_left = p_h->m_right = 0;
         }
     }
     /* single process */
     else //if (reg_judge_format(SINGLE_PROCESS_REG, p_line->c_str()))
     {
-        single_list.push_back(make_pair(i, 0));
+        sr_list.push_back(make_pair(i, 0));
         p_coder->related_map.insert(make_pair(i, p_h->multi_record));
 
-        p_h->single_start = i;
-        p_h->left = p_h->right = 0;
+        p_h->s_start = i;
+        p_h->s_left = p_h->s_right = 0;
         memset(&p_h->multi_record, 0, sizeof(multi_start_t));
     }
 }
 
 static bool matching_multi(vector <string> &format_code_vec, 
-                           list <pair<uint32_t, uint32_t>> &multi_list, 
+                           list <pair<uint32_t, uint32_t>> &mr_list, 
                            uint32_t line_no)
 {
     uint32_t last_brace = 0;
@@ -441,8 +434,7 @@ static bool matching_multi(vector <string> &format_code_vec,
             }
             left++;
 
-            if (0 == right - left
-                && match_assign_range(multi_list, i, last_brace))
+            if (right == left && match_assign_range(mr_list, i, last_brace))
             {
                 return true;
             }
@@ -459,9 +451,6 @@ static int find_key_lines(code_inspector_t *p_coder)
 
     list <pair<uint32_t, uint32_t>>::iterator it;
 
-    list <pair<uint32_t, uint32_t>> &single_list = p_coder->single_list;
-    list <pair<uint32_t, uint32_t>> &multi_list = p_coder->multi_list;
-
     loop_helper_t helper;
     memset(&helper, 0, sizeof(loop_helper_t));
 
@@ -473,264 +462,23 @@ static int find_key_lines(code_inspector_t *p_coder)
         deal_with_line(p_coder, &format_code_vec[i], i, &helper);
     }
     /* erase those invalid range */
-    for (it = single_list.begin(); it != single_list.end(); )
+    for (it = p_coder->sr_list.begin(); it != p_coder->sr_list.end(); )
     {
         if (0 == it->second ||
-            !matching_multi(format_code_vec, multi_list, it->first))
+            !matching_multi(format_code_vec, p_coder->mr_list, it->first))
         {
             /* don't worry, you can always find it in this case. */
             p_coder->related_map.erase(p_coder->related_map.find(it->first));
 
-            single_list.erase(it++);
+            p_coder->sr_list.erase(it++);
         }
         else {
             it++;
         }
     }
-    if (multi_list.empty() || single_list.empty())
+    if (p_coder->mr_list.empty() || p_coder->sr_list.empty())
     {
         show_red("the specified line couldn't be found\n");
-    }
-    return result;
-}
-
-static void replace_zore(string *p_line, int no)
-{
-    for (size_t i = 1; i < p_line->size(); i++)
-    {
-        char ch = p_line->c_str()[i - 1];
-
-        if ('0' == p_line->c_str()[i] && IS_VAR(ch))
-        {
-            p_line->replace(i, 1, to_string(no));
-        }
-    }
-}
-
-static void replace_var_zore(string *p_line, int no)
-{
-    for (size_t i = 1; i < p_line->size() - 1; i++)
-    {
-        char ch1 = p_line->c_str()[i - 1];
-        char ch2 = p_line->c_str()[i + 1];
-
-        if ('0' == p_line->c_str()[i] && IN_ALPHABET(ch1) && !IS_VAR(ch2))
-        {
-            p_line->replace(i, 1, to_string(no));
-        }
-    }
-}
-
-static bool replace_num(string *p_line, const char ch, int no)
-{
-    bool result = false;
-    for (size_t i = 1; i < p_line->size(); i++)
-    {
-        if (ch == p_line->c_str()[i]) 
-        {
-            result = true;
-            p_line->replace(i, 1, to_string(no));
-        }
-    }
-    return result;
-}
-
-static void multi_stitch(string *p_line, 
-                         string *p_base, int limit, const char *delim)
-{
-    string split;
-
-    for (int i = 1; i < limit; i++)
-    {
-        split = *p_base;
-        replace_zore(&split, i);
-        *p_line = *p_line + delim + split;
-    }
-}
-
-/*  match "x0[n];" with "xn[n];" */
-static bool match_multi_line(string *single, string *multi, int n)
-{
-    string intrm;
-
-    if (multi->compare(*single) == 0) 
-    {
-        return true;
-    }
-    for (int i = 1; i < n; i++)
-    {
-        intrm = *single;
-
-        if (multi->find('0') != string::npos)
-        {
-            replace_var_zore(&intrm, i);
-        }
-        else {
-            replace_num(&intrm, '0', i);
-        }
-        if (multi->compare(intrm) == 0)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-/*  match "func(x0 & x1 & y0 & y1);" with "func(x0 & y0);" */
-static bool match_multi_var(string *single, string *multi, int n)
-{
-    bool result = false;
-    string intrm, symbol, del;
-    size_t pos;
-    char ch;
-
-    intrm = *multi;
-    pos = multi->rfind('(');
-
-    if (pos == string::npos)
-    {
-        return result;
-    }
-    for (size_t i = pos, j = 0; i < single->size() - 1; i++)
-    {
-        if ('0' != single->c_str()[i]) {
-            continue;
-        }
-        for (j = i; j > 1; j--)
-        {
-            if (!IS_VAR(single->c_str()[j]))
-            {
-                j++;
-                break;
-            }
-        }
-        for (size_t k = 1; i > j && k < (size_t)n; k++)
-        {
-            ch = multi->c_str()[i + 1];
-
-            if (symbol.empty() && 
-                !IS_VAR(ch) && ch == multi->c_str()[i + 2]) // such as "&&"
-            {
-                symbol.assign(multi->c_str() + i + 1, 2);
-            }
-            else if (symbol.empty() && !IS_VAR(ch)) // such as "&"
-            {
-                symbol.assign(multi->c_str() + i + 1, 1);
-            }
-            del = symbol;
-            del.append(single->c_str() + j, i - j);
-            del += to_string(k);
-
-            if (symbol.empty() || string::npos == (pos = intrm.find(del)))
-            {
-                return result;
-            }
-            intrm.erase(pos, del.size());
-            del.clear();
-        }
-    }
-    if (intrm.compare(*single) == 0)
-    {
-        result = true;
-    }
-    return result;
-}
-
-/*  match "x0 = x1 = n;" with "x0 = n;" */
-static bool match_multi_equal(string *single, string *multi, int n)
-{
-    int equal_count = 0;
-
-    string base;
-    size_t offset = 0;
-    string intrm;
-
-    for (size_t i = 0; i < multi->size(); i++)
-    {
-        if ('=' == multi->c_str()[i]) 
-        {
-            if (0 == offset) {
-                offset = i;
-            }
-            equal_count++;
-        }
-    }
-    if (equal_count > 1)
-    {
-        base.assign(single->c_str(), offset);
-        intrm = base;
-    }
-    else {
-        return false;
-    }
-    multi_stitch(&intrm, &base, equal_count, "=");
-
-    if (multi->compare(0, intrm.size(), intrm.c_str()) == 0)
-    {
-        return true;
-    }
-    return false;
-}
-
-/* match "x += n;" with "x += 1;" */
-static bool match_multi_calc(string *single, string *multi, int n)
-{
-    bool result = false;
-    string intrm;
-    
-    if (single->find("+=1") == string::npos &&
-        single->find("-=1") == string::npos)
-    {
-        return result;
-    }
-    intrm = *single;
-
-    replace_num(&intrm, '1', n);
-    if (multi->compare(0, intrm.size(), intrm.c_str()) == 0)
-    {
-        return true;
-    }
-    return result;
-}
-
-/* match "func_xn(a, b0, bn, c0, cn)" with "func_x1(a, b0, c0)" */
-static bool match_multi_func(string *single, string *multi, int n)
-{
-    bool result = false;
-    string intrm, del;
-    size_t pos;
-
-    intrm = *multi;
-    if (false == replace_num(&intrm, to_string(n)[0], 1)) {
-        return result;
-    }
-    for (size_t i = 0, j = 0; i < single->size(); i++)
-    {
-        if ('0' != single->c_str()[i]) {
-            continue;
-        }
-        for (j = i; j > 1; j--)
-        {
-            //if (',' == single->c_str()[j]) {
-            if (!IS_VAR(single->c_str()[j])) {
-                break;
-            }
-        }
-        for (size_t k = 1; k < (size_t)n; k++)
-        {
-            del.assign(single->c_str() + j, i - j);
-            del += to_string(k);
-
-            if (string::npos == (pos = intrm.find(del)))
-            {
-                return result;
-            }
-            intrm.erase(pos, del.size());
-        }
-    }
-    if (intrm.compare(*single) == 0)
-    {
-        result = true;
     }
     return result;
 }
@@ -762,11 +510,7 @@ static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
             {
                 continue;
             }
-            if (match_multi_line(single, multi, n)
-                || match_multi_var(single, multi, n)
-                || match_multi_equal(single, multi, n)
-                || match_multi_calc(single, multi, n)
-                || match_multi_func(single, multi, n))
+            if (varied_matching_rules(single->c_str(), multi->c_str(), n))
             {
                 is_match = true;
                 p_coder->refers_arr[j]++;
@@ -788,8 +532,8 @@ static void pick_multi_to_compare(code_inspector_t *p_coder,
 {
     list <pair<uint32_t, uint32_t>>::iterator multi_it;
 
-    for (multi_it = p_coder->multi_list.begin(); 
-         start && multi_it != p_coder->multi_list.end(); multi_it++)
+    for (multi_it = p_coder->mr_list.begin(); 
+         start && multi_it != p_coder->mr_list.end(); multi_it++)
     {
         if (multi_it->first != start) {
             continue;
@@ -815,9 +559,9 @@ static void code_flow_analysis(code_inspector_t *p_coder)
 
     map <uint32_t, multi_start_t>::iterator map_it;
 
-    single_it = p_coder->single_list.begin();
+    single_it = p_coder->sr_list.begin();
 
-    for (; single_it != p_coder->single_list.end(); single_it++)
+    for (; single_it != p_coder->sr_list.end(); single_it++)
     {
         map_it = p_coder->related_map.find(single_it->first);
 
