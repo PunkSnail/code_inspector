@@ -141,7 +141,7 @@ static int load_code_file(const char *open_path, code_inspector_t *p_coder)
     filebuf fb;
     string line;
 
-    if(fb.open(open_path, ios::in) == NULL)
+    if (fb.open(open_path, ios::in) == NULL)
     {
         show_red("open error: %s\n", strerror(errno));
         return result;
@@ -160,8 +160,8 @@ static int load_code_file(const char *open_path, code_inspector_t *p_coder)
 
 /* when using functions of the string class,
  * don't need to care about crossing the boundary */
-static void ignore_comments(string *p_line, bool *p_comment_judge, 
-                            bool *p_macro_judge, int *p_if_count)
+static void ignore_comments(string *p_line, bool &is_comment, 
+                            bool &is_macro, int &if_count)
 {
     /* first deal with comment symbol */
     if (p_line->compare(0, 2, "//") == 0)
@@ -171,40 +171,38 @@ static void ignore_comments(string *p_line, bool *p_comment_judge,
     }
     if (p_line->compare(0, 2, "/*") == 0 )
     {
-        *p_comment_judge = true;
+        is_comment = true;
     }
     /* comment between symbols */
-    if (*p_comment_judge && p_line->find("*/") == string::npos)
+    if (is_comment && p_line->find("*/") == string::npos)
     {
         p_line->clear();
         return;
     }
-    else /* normal case */
+    /* clear lines ending with comment symbol */
+    if (is_comment && p_line->size() >= 2 
+        &&  '*' == p_line->c_str()[p_line->size() - 2] 
+        &&  '/' == p_line->c_str()[p_line->size() - 1])
     {
-        /* clear lines ending with comment symbol */
-        if (*p_comment_judge && p_line->size() >= 2 
-            &&  '*' == p_line->c_str()[p_line->size() - 2]
-            &&  '/' == p_line->c_str()[p_line->size() - 1])
-        {
-            p_line->clear();
-        }
-        *p_comment_judge = false;
+        p_line->clear();
     }
+    is_comment = false;
+
     /* handling nested #if */
-    if (p_line->compare(0, 4, "#if0") == 0)
+    if (false == is_macro && p_line->compare(0, 4, "#if0") == 0)
     {
-        *p_macro_judge = true; 
+        is_macro = true; 
     }
-    if (*p_macro_judge)
+    if (is_macro)
     {
         if (p_line->compare(0, 3, "#if") == 0)
         {
-            (*p_if_count)++;
+            if_count++;
         }
         if (p_line->compare(0, 6, "#endif") == 0
-            && (--(*p_if_count) == 0))
+            && (--if_count == 0))
         {
-            *p_macro_judge = false;
+            is_macro = false;
         }
         p_line->clear();
     }
@@ -243,8 +241,8 @@ static void format_code_string(vector<string> &format_code_vec)
     size_t i;
     bool is_unassigned;
 
-    bool comment_judge = false;
-    bool macro_judge = false;
+    bool is_comment = false;
+    bool is_macro = false;
     int if_count = 0;   /* between #if 0  and #endif */
 
     /* "line_no + 1" exists inside the loop, so here size() - 1 */
@@ -280,7 +278,7 @@ re_loop:
             line_no++;
             goto re_loop;
         }
-        ignore_comments(p_line, &comment_judge, &macro_judge, &if_count);
+        ignore_comments(p_line, is_comment, is_macro, if_count);
 
         ignore_unassigned(p_line, is_unassigned);
 
@@ -538,17 +536,15 @@ static void pick_multi_to_compare(code_inspector_t *p_coder,
         if (multi_it->first != start) {
             continue;
         }
-        show("MULTI FLOW %d START %u\n", g_multi_num_arr[type], start);
+        show_green("\nMULTI FLOW %d START %u\n", g_multi_num_arr[type], start);
         p_coder->clear_refers_arr();
 
         compare_with_single(p_coder, type, s_range, &(*multi_it));
 
         if (p_coder->is_perfect_match)
         {
-            show_green("\tis perfect match\n");
+            show_green("\tMULTI FLOW IS PERFECT MATCH\n");
         }
-        /* XXX: Now I know which lines in the single process don't match, 
-         * maybe try to do something */
         break;
     }
 }
@@ -556,8 +552,10 @@ static void pick_multi_to_compare(code_inspector_t *p_coder,
 static void code_flow_analysis(code_inspector_t *p_coder)
 {
     list <pair<uint32_t, uint32_t>>::iterator single_it;
-
     map <uint32_t, multi_start_t>::iterator map_it;
+    string split(80, '/');
+    string *single;
+    bool first;
 
     single_it = p_coder->sr_list.begin();
 
@@ -565,12 +563,30 @@ static void code_flow_analysis(code_inspector_t *p_coder)
     {
         map_it = p_coder->related_map.find(single_it->first);
 
+        show("\n%s\n", split.c_str());
         for (int i = 0; i < MULTI_FLOW_ARR_SIZE; i++)
         {
             p_coder->is_perfect_match = true;
 
             pick_multi_to_compare(p_coder, (multi_type_t)i, 
                                   map_it->second.arr[i], &(*single_it));
+        }
+        first = true;
+        /* range start +1 skip the "while" line */
+        for (uint32_t i = single_it->first + 1; i < single_it->second; i++)
+        {
+            single = &p_coder->format_code_vec[i];
+
+            /* this line has been matched multiple times or invalid length */
+            if (p_coder->refers_arr[i] || single->size() < 2) {
+                continue;
+            }
+            if (first)
+            {
+                show_green("\nSINGLE FLOW START %u\n", single_it->first);
+                first = false;
+            }
+            show("%u%s\n", i, p_coder->code_vec[i].c_str());
         }
     }
 }
