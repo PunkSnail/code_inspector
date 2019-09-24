@@ -423,18 +423,14 @@ static bool matching_multi(vector <string> &format_code_vec,
             }
             right++;
         }
-        if (format_code_vec[i].find('{') != string::npos)
+        if (format_code_vec[i].find('{') != string::npos 
+            && ++left == right && last_brace)
         {
-            if (0 == last_brace)
-            {
-                return false;
-            }
-            left++;
-
-            if (right == left && match_assign_range(mr_list, i, last_brace))
+            if (match_assign_range(mr_list, i, last_brace))
             {
                 return true;
             }
+            break;  /* only once */
         }
     }
     return false;

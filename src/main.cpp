@@ -19,7 +19,7 @@ int main(int argc, char *argv[])
     int opt;
 
     static struct option ops[] = {
-        { "file", required_argument, NULL, 'p' },
+        { "file", required_argument, NULL, 'f' },
         { "help", no_argument, NULL, 'h' }
     };
     while ((opt = getopt_long(argc, argv, "f:h", ops, NULL)) != -1)
