@@ -68,8 +68,8 @@ public:
     vector <string> format_code_vec;
 
     /* start and end line numbers */
-    list <pair<uint32_t, uint32_t>> sr_list; /* single processing range */
-    list <pair<uint32_t, uint32_t>> mr_list; /* multi processing range */
+    list < pair<uint32_t, uint32_t> > sr_list; /* single processing range */
+    list < pair<uint32_t, uint32_t> > mr_list; /* multi processing range */
 
     /* multi start related to single start */
     map <uint32_t, multi_start_t> related_map; 
@@ -223,7 +223,7 @@ static void ignore_unassigned(string *p_line, bool is_unassigned)
 }
 
 static void ignore_special(string *p_line, 
-                           const char **ignore_arr, uint32_t arr_len)
+                           const char **ignore_arr, size_t arr_len)
 {
     for (size_t i = 0; i < arr_len; i++)
     {
@@ -287,11 +287,10 @@ re_loop:
     }
 }
 
-static bool match_assign_range(list <pair<uint32_t, uint32_t>> &range_list, 
+static bool match_assign_range(list < pair<uint32_t, uint32_t> > &range_list, 
                                uint32_t first_brace, uint32_t last_brace)
 {
-    for (list <pair<uint32_t, uint32_t>>::iterator it = range_list.begin(); 
-         it != range_list.end(); it++)
+    for (auto it = range_list.begin(); it != range_list.end(); it++)
     {
         /* line number minus line number, fuzzy matching 0, 1, 2 */
         if (first_brace - it->first < 3)
@@ -352,8 +351,8 @@ static bool filter_multi_flow(string *p_line, uint32_t line_no, uint32_t *arr)
 static void deal_with_line(code_inspector_t *p_coder, 
                            string *p_line, uint32_t i, loop_helper_t *p_h)
 {
-    list <pair<uint32_t, uint32_t>> &sr_list = p_coder->sr_list;
-    list <pair<uint32_t, uint32_t>> &mr_list = p_coder->mr_list;
+    auto &sr_list = p_coder->sr_list;
+    auto &mr_list = p_coder->mr_list;
 
     if (p_line->find('{') != string::npos)
     {
@@ -404,7 +403,7 @@ static void deal_with_line(code_inspector_t *p_coder,
 }
 
 static bool matching_multi(vector <string> &format_code_vec, 
-                           list <pair<uint32_t, uint32_t>> &mr_list, 
+                           list < pair<uint32_t, uint32_t> > &mr_list, 
                            uint32_t line_no)
 {
     uint32_t last_brace = 0;
@@ -447,8 +446,6 @@ static int find_key_lines(code_inspector_t *p_coder)
 
     vector <string> &format_code_vec = p_coder->format_code_vec;
 
-    list <pair<uint32_t, uint32_t>>::iterator it;
-
     loop_helper_t helper;
     memset(&helper, 0, sizeof(loop_helper_t));
 
@@ -460,7 +457,7 @@ static int find_key_lines(code_inspector_t *p_coder)
         deal_with_line(p_coder, &format_code_vec[i], i, &helper);
     }
     /* erase those invalid range */
-    for (it = p_coder->sr_list.begin(); it != p_coder->sr_list.end(); )
+    for (auto it = p_coder->sr_list.begin(); it != p_coder->sr_list.end(); )
     {
         if (0 == it->second ||
             !matching_multi(format_code_vec, p_coder->mr_list, it->first))
@@ -528,9 +525,7 @@ static void pick_multi_to_compare(code_inspector_t *p_coder,
                                   multi_type_t type, uint32_t start, 
                                   pair<uint32_t, uint32_t> *s_range)
 {
-    list <pair<uint32_t, uint32_t>>::iterator multi_it;
-
-    for (multi_it = p_coder->mr_list.begin(); 
+    for (auto multi_it = p_coder->mr_list.begin(); 
          start && multi_it != p_coder->mr_list.end(); multi_it++)
     {
         if (multi_it->first != start) {
@@ -551,17 +546,14 @@ static void pick_multi_to_compare(code_inspector_t *p_coder,
 
 static void code_flow_analysis(code_inspector_t *p_coder)
 {
-    list <pair<uint32_t, uint32_t>>::iterator single_it;
-    map <uint32_t, multi_start_t>::iterator map_it;
     string split(80, '/');
     string *single;
     bool first;
 
-    single_it = p_coder->sr_list.begin();
-
-    for (; single_it != p_coder->sr_list.end(); single_it++)
+    for (auto single_it = p_coder->sr_list.begin(); 
+         single_it != p_coder->sr_list.end(); single_it++)
     {
-        map_it = p_coder->related_map.find(single_it->first);
+        auto map_it = p_coder->related_map.find(single_it->first);
 
         show("\n%s\n", split.c_str());
         for (int i = 0; i < MULTI_FLOW_ARR_SIZE; i++)

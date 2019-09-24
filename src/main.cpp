@@ -37,8 +37,10 @@ int main(int argc, char *argv[])
             return -1;
         }
     }
-    if (NULL == code_path) {
+    if (NULL == code_path)
+    {
         printf("Missing target code. Try: %s --help\n", argv[0]);
+        return -1;
     }
     code_inspector_input(code_path);
 
