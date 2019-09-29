@@ -7,7 +7,6 @@
 #include <unistd.h>     /* access ... */
 #include <sys/stat.h>   /* stat */
 #include <regex.h>      /* regcomp ... */
-#include <ctype.h>      /* isdigit */
 
 #include <vector>
 #include <list>
@@ -169,7 +168,8 @@ static void ignore_comments(string *p_line, bool &is_comment,
         p_line->clear();
         return;
     }
-    if (p_line->compare(0, 2, "/*") == 0 )
+    /* beginning of comment */
+    if (false == is_comment && p_line->compare(0, 2, "/*") == 0)
     {
         is_comment = true;
     }
@@ -181,14 +181,14 @@ static void ignore_comments(string *p_line, bool &is_comment,
     }
     /* clear lines ending with comment symbol */
     if (is_comment && p_line->size() >= 2 
-        &&  '*' == p_line->c_str()[p_line->size() - 2] 
-        &&  '/' == p_line->c_str()[p_line->size() - 1])
+        && '*' == p_line->c_str()[p_line->size() - 2] 
+        && '/' == p_line->c_str()[p_line->size() - 1])
     {
         p_line->clear();
     }
     is_comment = false;
 
-    /* handling nested #if */
+    /* deal with nested #if */
     if (false == is_macro && p_line->compare(0, 4, "#if0") == 0)
     {
         is_macro = true; 
@@ -199,8 +199,7 @@ static void ignore_comments(string *p_line, bool &is_comment,
         {
             if_count++;
         }
-        if (p_line->compare(0, 6, "#endif") == 0
-            && (--if_count == 0))
+        if (p_line->compare(0, 6, "#endif") == 0 && --if_count == 0)
         {
             is_macro = false;
         }
@@ -208,29 +207,43 @@ static void ignore_comments(string *p_line, bool &is_comment,
     }
 }
 
-/* ignore unassigned variables */
-static void ignore_unassigned(string *p_line, bool is_unassigned)
+static void ignore_extra(vector<string> &format_code_vec)
 {
-    if (is_unassigned && !p_line->empty()
-        && p_line->compare(0, 4, "goto")
-        && p_line->compare(0, 4, "else")
-        && p_line->compare(0, 5, "break")
-        && p_line->compare(0, 6, "return")
-        && p_line->compare(0, 8, "continue"))
-    {
-        p_line->clear();
-    }
-}
+    string *p_line;
+    bool is_unassigned;
 
-static void ignore_special(string *p_line, 
-                           const char **ignore_arr, size_t arr_len)
-{
-    for (size_t i = 0; i < arr_len; i++)
+    for (size_t i = 1; i < format_code_vec.size(); i++)
     {
-        if (p_line->find(ignore_arr[i]) != string::npos)
+        p_line = &format_code_vec[i];
+        is_unassigned = true;
+
+        if (p_line->empty()) {
+            continue;
+        }
+        for (size_t j = 0; is_unassigned && j < p_line->size(); j++)
+        {
+            char ch = p_line->c_str()[j];
+
+            if (!IS_VAR(ch) && ',' != ch && '*' != ch)
+            {
+                is_unassigned = false;
+            }
+        }
+        /* ignore unassigned variables */
+        if (is_unassigned
+            && p_line->compare(0, 4, "goto")
+            && p_line->compare(0, 4, "else")
+            && p_line->compare(0, 5, "break")
+            && p_line->compare(0, 6, "return")
+            && p_line->compare(0, 8, "continue"))
         {
             p_line->clear();
-            return;
+            continue;
+        }
+        for (size_t j = 0; j < sizeof(g_ignore_arr) / sizeof(char*); j++)
+        {
+            if (p_line->find(g_ignore_arr[j]) != string::npos)
+                p_line->clear();
         }
     }
 }
@@ -239,7 +252,6 @@ static void format_code_string(vector<string> &format_code_vec)
 {
     string *p_line;
     size_t i;
-    bool is_unassigned;
 
     bool is_comment = false;
     bool is_macro = false;
@@ -249,7 +261,6 @@ static void format_code_string(vector<string> &format_code_vec)
     for (size_t line_no = 1; line_no < format_code_vec.size() - 1; line_no++)
     {
         p_line = &format_code_vec[line_no];
-        is_unassigned = true;
 re_loop:
         /* must remove spaces first */
         for (i = 0; i < p_line->size(); )
@@ -260,10 +271,6 @@ re_loop:
             {
                 p_line->erase(i, 1);
                 continue;
-            }
-            if (is_unassigned && !IS_VAR(ch) && ',' != ch && '*' != ch)
-            {
-                is_unassigned = false;
             }
             i++;
         }
@@ -279,12 +286,8 @@ re_loop:
             goto re_loop;
         }
         ignore_comments(p_line, is_comment, is_macro, if_count);
-
-        ignore_unassigned(p_line, is_unassigned);
-
-        ignore_special(p_line, g_ignore_arr, 
-                       sizeof(g_ignore_arr) / sizeof(char*));
     }
+    ignore_extra(format_code_vec);
 }
 
 static bool match_assign_range(list < pair<uint32_t, uint32_t> > &range_list, 
@@ -351,9 +354,6 @@ static bool filter_multi_flow(string *p_line, uint32_t line_no, uint32_t *arr)
 static void deal_with_line(code_inspector_t *p_coder, 
                            string *p_line, uint32_t i, loop_helper_t *p_h)
 {
-    auto &sr_list = p_coder->sr_list;
-    auto &mr_list = p_coder->mr_list;
-
     if (p_line->find('{') != string::npos)
     {
         p_h->s_left++;
@@ -367,12 +367,12 @@ static void deal_with_line(code_inspector_t *p_coder,
     /* assign value to the end line number */
     if (p_h->s_start && p_h->s_right == p_h->s_left)
     {
-        match_assign_range(sr_list, p_h->s_start, i);
+        match_assign_range(p_coder->sr_list, p_h->s_start, i);
         p_h->s_start = 0;
     }
     if (p_h->m_start && p_h->m_right == p_h->m_left)
     {
-        match_assign_range(mr_list, p_h->m_start, i);
+        match_assign_range(p_coder->mr_list, p_h->m_start, i);
         p_h->m_start = 0;
     }
     if (false == reg_judge_format(NORMAL_PROCESS_REG, p_line->c_str()))
@@ -385,7 +385,7 @@ static void deal_with_line(code_inspector_t *p_coder,
         if (filter_multi_flow(p_line, i, p_h->multi_record.arr))
         {
             /* don't know the end line number yet */
-            mr_list.push_back(make_pair(i, 0));
+            p_coder->mr_list.push_back(make_pair(i, 0));
             p_h->m_start = i;
             p_h->m_left = p_h->m_right = 0;
         }
@@ -393,7 +393,7 @@ static void deal_with_line(code_inspector_t *p_coder,
     /* single process */
     else //if (reg_judge_format(SINGLE_PROCESS_REG, p_line->c_str()))
     {
-        sr_list.push_back(make_pair(i, 0));
+        p_coder->sr_list.push_back(make_pair(i, 0));
         p_coder->related_map.insert(make_pair(i, p_h->multi_record));
 
         p_h->s_start = i;
@@ -544,7 +544,6 @@ static void code_flow_analysis(code_inspector_t *p_coder)
 {
     string split(80, '/');
     string *single;
-    bool first;
 
     for (auto single_it = p_coder->sr_list.begin(); 
          single_it != p_coder->sr_list.end(); single_it++)
@@ -559,9 +558,9 @@ static void code_flow_analysis(code_inspector_t *p_coder)
             pick_multi_to_compare(p_coder, (multi_type_t)i, 
                                   map_it->second.arr[i], &(*single_it));
         }
-        first = true;
         /* range start +1 skip the "while" line */
-        for (uint32_t i = single_it->first + 1; i < single_it->second; i++)
+        for (uint32_t i = single_it->first + 1, flag = true; 
+             i < single_it->second; i++)
         {
             single = &p_coder->format_code_vec[i];
 
@@ -569,10 +568,10 @@ static void code_flow_analysis(code_inspector_t *p_coder)
             if (p_coder->refers_arr[i] || single->size() < 2) {
                 continue;
             }
-            if (first)
+            if (flag)
             {
                 show_green("\nSINGLE FLOW START %u\n", single_it->first);
-                first = false;
+                flag = false;
             }
             show("%u%s\n", i, p_coder->code_vec[i].c_str());
         }
