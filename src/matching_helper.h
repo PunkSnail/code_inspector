@@ -10,9 +10,11 @@
 #define IN_ALPHABET(c) \
     (((c >= 'a' && c <= 'z') || (c >='A' && c <= 'Z')) ? true : false)
 
-/* match multi-packet processing lines 
- * based on single-packet processing lines
- * return:   match true     mismatch false  */
+/* note: match multi-packet processing lines based on single-packet processing
+ * when this function is called, the string has been formatted
+ * ' ', ';', '\r' and '\n' are removed
+ *
+ * return:   match true     mismatch false */
 bool varied_matching_rules(const char *single, const char *multi, int n);
 
 

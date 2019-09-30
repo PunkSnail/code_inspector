@@ -251,38 +251,40 @@ static void ignore_extra(vector<string> &format_code_vec)
 static void format_code_string(vector<string> &format_code_vec)
 {
     string *p_line;
-    size_t i;
 
     bool is_comment = false;
     bool is_macro = false;
     int if_count = 0;   /* between #if 0  and #endif */
 
-    /* "line_no + 1" exists inside the loop, so here size() - 1 */
-    for (size_t line_no = 1; line_no < format_code_vec.size() - 1; line_no++)
+    /* "i + 1" exists inside the loop, so here size() - 1 */
+    for (size_t i = 1, j = 0; i < format_code_vec.size() - 1; i++)
     {
-        p_line = &format_code_vec[line_no];
+        p_line = &format_code_vec[i];
 re_loop:
         /* must remove spaces first */
-        for (i = 0; i < p_line->size(); )
+        for (j = 0; j < p_line->size(); )
         {
-            char ch = p_line->c_str()[i];
+            char ch = p_line->c_str()[j];
 
             if (' ' ==  ch || ';' == ch || '\r' == ch || '\n' == ch)
             {
-                p_line->erase(i, 1);
+                p_line->erase(j, 1);
                 continue;
             }
-            i++;
+            j++;
+        }
+        if (0 == j) {
+            continue;
         }
         /* end whit '=' or can't find match ')',  merge next line */
-        if (i && ('=' == p_line->c_str()[i - 1] ||
-                  (p_line->find('(') != string::npos
-                   && p_line->find(')') == string::npos)))
+        if ('=' == p_line->c_str()[j - 1] || 
+            (p_line->find('(') != string::npos && 
+             p_line->find(')') == string::npos))
         {
-            *p_line += format_code_vec[line_no + 1];
-            format_code_vec[line_no + 1].clear();
+            *p_line += format_code_vec[i + 1];
+            format_code_vec[i + 1].clear();
 
-            line_no++;
+            i++;
             goto re_loop;
         }
         ignore_comments(p_line, is_comment, is_macro, if_count);
@@ -384,14 +386,14 @@ static void deal_with_line(code_inspector_t *p_coder,
     {
         if (filter_multi_flow(p_line, i, p_h->multi_record.arr))
         {
-            /* don't know the end line number yet */
+            /* don't know the end line number yet, 
+             * it will be assigned by "match_assign_range" */
             p_coder->mr_list.push_back(make_pair(i, 0));
             p_h->m_start = i;
             p_h->m_left = p_h->m_right = 0;
         }
     }
-    /* single process */
-    else //if (reg_judge_format(SINGLE_PROCESS_REG, p_line->c_str()))
+    else /* single process */
     {
         p_coder->sr_list.push_back(make_pair(i, 0));
         p_coder->related_map.insert(make_pair(i, p_h->multi_record));
@@ -470,18 +472,18 @@ static int find_key_lines(code_inspector_t *p_coder)
     if (p_coder->mr_list.empty() || p_coder->sr_list.empty())
     {
         show_red("the specified line couldn't be found\n");
+        result = -1;
     }
     return result;
 }
 
-static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
+static void compare_with_single(code_inspector_t *p_coder, int n,
                                 pair<uint32_t, uint32_t> *s_range, 
                                 pair<uint32_t, uint32_t> *m_range)
 {
     string *single;
     string *multi;
     bool is_match = false;
-    int n = g_multi_num_arr[type];
 
     /* range start +1 skip the "while" line */
     for (uint32_t i = m_range->first + 1; i < m_range->second; i++)
@@ -518,7 +520,7 @@ static void compare_with_single(code_inspector_t *p_coder, multi_type_t type,
 }
 
 static void pick_multi_to_compare(code_inspector_t *p_coder, 
-                                  multi_type_t type, uint32_t start, 
+                                  int n, uint32_t start, 
                                   pair<uint32_t, uint32_t> *s_range)
 {
     for (auto multi_it = p_coder->mr_list.begin(); 
@@ -527,10 +529,10 @@ static void pick_multi_to_compare(code_inspector_t *p_coder,
         if (multi_it->first != start) {
             continue;
         }
-        show_green("\nMULTI FLOW %d START %u\n", g_multi_num_arr[type], start);
+        show_green("\nMULTI FLOW %d START %u\n", n, start);
         p_coder->clear_refers_arr();
 
-        compare_with_single(p_coder, type, s_range, &(*multi_it));
+        compare_with_single(p_coder, n, s_range, &(*multi_it));
 
         if (p_coder->is_perfect_match)
         {
@@ -540,10 +542,29 @@ static void pick_multi_to_compare(code_inspector_t *p_coder,
     }
 }
 
+static void output_lonely_single(code_inspector_t *p_coder, 
+                                 pair<uint32_t, uint32_t> *range)
+{
+    /* range start +1 skip the "while" line */
+    for (uint32_t i = range->first + 1, flag = true; i < range->second; i++)
+    {
+        /* this line has been matched multiple times or invalid length */
+        if (p_coder->refers_arr[i] || p_coder->format_code_vec[i].size() < 2)
+        {
+            continue;
+        }
+        if (flag)
+        {
+            show_green("\nSINGLE FLOW START %u\n", range->first);
+            flag = false;
+        }
+        show("%u%s\n", i, p_coder->code_vec[i].c_str());
+    }
+}
+
 static void code_flow_analysis(code_inspector_t *p_coder)
 {
     string split(80, '/');
-    string *single;
 
     for (auto single_it = p_coder->sr_list.begin(); 
          single_it != p_coder->sr_list.end(); single_it++)
@@ -555,26 +576,10 @@ static void code_flow_analysis(code_inspector_t *p_coder)
         {
             p_coder->is_perfect_match = true;
 
-            pick_multi_to_compare(p_coder, (multi_type_t)i, 
+            pick_multi_to_compare(p_coder, g_multi_num_arr[i], 
                                   map_it->second.arr[i], &(*single_it));
         }
-        /* range start +1 skip the "while" line */
-        for (uint32_t i = single_it->first + 1, flag = true; 
-             i < single_it->second; i++)
-        {
-            single = &p_coder->format_code_vec[i];
-
-            /* this line has been matched multiple times or invalid length */
-            if (p_coder->refers_arr[i] || single->size() < 2) {
-                continue;
-            }
-            if (flag)
-            {
-                show_green("\nSINGLE FLOW START %u\n", single_it->first);
-                flag = false;
-            }
-            show("%u%s\n", i, p_coder->code_vec[i].c_str());
-        }
+        output_lonely_single(p_coder, &(*single_it));
     }
 }
 

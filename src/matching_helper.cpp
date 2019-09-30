@@ -4,6 +4,10 @@
 
 using namespace std;
 
+/* when these functions are called, the string has been formatted
+ * ' ', ';', '\r' and '\n' are removed. 
+ */
+
 static void replace_var_zore(string *p_line, int no)
 {
     for (size_t i = 1; i < p_line->size() - 1; i++)
@@ -54,19 +58,29 @@ static void multi_stitch(string *p_line,
     }
 }
 
-/*  match "x0[n];" with "xn[n];" */
+/* match "a1f=0" with "a0f=0" */
 static bool match_multi_line(string *single, string *multi, int n)
 {
     string intrm;
-
+    size_t pos;
     if (multi->compare(*single) == 0) 
     {
         return true;
     }
     for (int i = 1; i < n; i++)
     {
+        pos = single->find('0');
+        if (pos == string::npos) {
+            continue;
+        }
         intrm = *single;
-
+        intrm.replace(pos, 1, to_string(i));
+        if (multi->compare(intrm) == 0)
+        {
+            return true;
+        }
+        /* match "a1=b1->h+func(0x10)" with "a0=b0->h+func(0x10)" */
+        intrm = *single;
         if (multi->find('0') != string::npos)
         {
             replace_var_zore(&intrm, i);
@@ -82,7 +96,7 @@ static bool match_multi_line(string *single, string *multi, int n)
     return false;
 }
 
-/*  match "func(x0 & x1 & y0 & y1);" with "func(x0 & y0);" */
+/*  match "func(x0&x1&y0&y1)" with "func(x0&y0)" */
 static bool match_multi_var(string *single, string *multi, int n)
 {
     bool result = false;
@@ -142,7 +156,7 @@ static bool match_multi_var(string *single, string *multi, int n)
     return result;
 }
 
-/*  match "x0 = x1 = n;" with "x0 = n;" */
+/*  match "x0=x1=n" with "x0=n" */
 static bool match_multi_equal(string *single, string *multi, int n)
 {
     int equal_count = 0;
@@ -178,7 +192,7 @@ static bool match_multi_equal(string *single, string *multi, int n)
     return false;
 }
 
-/* match "x += n;" with "x += 1;" */
+/* match "x+=n" with "x+=1" */
 static bool match_multi_calc(string *single, string *multi, int n)
 {
     bool result = false;
@@ -199,7 +213,7 @@ static bool match_multi_calc(string *single, string *multi, int n)
     return result;
 }
 
-/* match "func_xn(a, b0, bn, c0, cn)" with "func_x1(a, b0, c0)" */
+/* match "func_xn(a,b0,bn,c0,cn)" with "func_x1(a,b0,c0)" */
 static bool match_multi_func(const string *single, const string *multi, int n)
 {
     bool result = false;
