@@ -224,7 +224,7 @@ static void ignore_extra(vector<string> &format_code_vec)
         {
             char ch = p_line->c_str()[j];
 
-            if (!IS_VAR(ch) && ',' != ch && '*' != ch)
+            if (!IS_VAR(ch) && ',' != ch && '*' != ch && ';' != ch)
             {
                 is_unassigned = false;
             }
@@ -266,7 +266,7 @@ re_loop:
         {
             char ch = p_line->c_str()[j];
 
-            if (' ' ==  ch || ';' == ch || '\r' == ch || '\n' == ch)
+            if (' ' ==  ch || '\r' == ch || '\n' == ch)
             {
                 p_line->erase(j, 1);
                 continue;

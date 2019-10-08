@@ -2,10 +2,12 @@
 #include <string>
 #include "matching_helper.h"
 
+#include <iostream>
+#include "matching_helper.h"
 using namespace std;
 
 /* when these functions are called, the string has been formatted
- * ' ', ';', '\r' and '\n' are removed. 
+ * ' ', '\r' and '\n' are removed. 
  */
 
 static void replace_var_zore(string *p_line, int no)
@@ -58,7 +60,7 @@ static void multi_stitch(string *p_line,
     }
 }
 
-/* match "a1f=0" with "a0f=0" */
+/* match "a1f=0;" with "a0f=0;" */
 static bool match_multi_line(string *single, string *multi, int n)
 {
     string intrm;
@@ -79,7 +81,7 @@ static bool match_multi_line(string *single, string *multi, int n)
         {
             return true;
         }
-        /* match "a1=b1->h+func(0x10)" with "a0=b0->h+func(0x10)" */
+        /* match "a1=b1->h+func(0x10);" with "a0=b0->h+func(0x10);" */
         intrm = *single;
         if (multi->find('0') != string::npos)
         {
@@ -96,7 +98,7 @@ static bool match_multi_line(string *single, string *multi, int n)
     return false;
 }
 
-/*  match "func(x0&x1&y0&y1)" with "func(x0&y0)" */
+/*  match "func(x0&x1&y0&y1);" with "func(x0&y0);" */
 static bool match_multi_var(string *single, string *multi, int n)
 {
     bool result = false;
@@ -156,7 +158,7 @@ static bool match_multi_var(string *single, string *multi, int n)
     return result;
 }
 
-/*  match "x0=x1=n" with "x0=n" */
+/*  match "x0=x1=n;" with "x0=n;" */
 static bool match_multi_equal(string *single, string *multi, int n)
 {
     int equal_count = 0;
@@ -192,7 +194,7 @@ static bool match_multi_equal(string *single, string *multi, int n)
     return false;
 }
 
-/* match "x+=n" with "x+=1" */
+/* match "x+=n;" with "x+=1;" */
 static bool match_multi_calc(string *single, string *multi, int n)
 {
     bool result = false;
@@ -213,7 +215,7 @@ static bool match_multi_calc(string *single, string *multi, int n)
     return result;
 }
 
-/* match "func_xn(a,b0,bn,c0,cn)" with "func_x1(a,b0,c0)" */
+/* match "func_xn(a,b0,bn,c0,cn);" with "func_x1(a,b0,c0);" */
 static bool match_multi_func(const string *single, const string *multi, int n)
 {
     bool result = false;
@@ -231,8 +233,7 @@ static bool match_multi_func(const string *single, const string *multi, int n)
         }
         for (j = i; j > 1; j--)
         {
-            //if (',' == single->c_str()[j]) {
-            if (!IS_VAR(single->c_str()[j])) {
+            if (',' == single->c_str()[j]) {
                 break;
             }
         }
