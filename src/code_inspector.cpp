@@ -572,7 +572,7 @@ static void code_flow_analysis(code_inspector_t *p_coder)
         auto map_it = p_coder->related_map.find(single_it->first);
 
         show("\n%s\n", split.c_str());
-        for (int i = 0; i < MULTI_FLOW_ARR_SIZE; i++)
+        for (int i = MULTI_FLOW_ARR_SIZE - 1; i >= 0; i--)
         {
             p_coder->is_perfect_match = true;
 
