@@ -1,13 +1,14 @@
 
 #include <string>
+#include <iostream>
+
+#include "code_inspector.h"
 #include "matching_helper.h"
 
-#include <iostream>
-#include "matching_helper.h"
 using namespace std;
 
 /* when these functions are called, the string has been formatted
- * ' ', '\r' and '\n' are removed. 
+ * ' ', '\r' and '\n' are removed.
  */
 
 static void replace_var_zore(string *p_line, int no)
@@ -29,7 +30,7 @@ static bool replace_num(string *p_line, const char ch, int no)
     bool result = false;
     for (size_t i = 1; i < p_line->size(); i++)
     {
-        if (ch == p_line->c_str()[i]) 
+        if (ch == p_line->c_str()[i])
         {
             result = true;
             p_line->replace(i, 1, to_string(no));
@@ -38,7 +39,7 @@ static bool replace_num(string *p_line, const char ch, int no)
     return result;
 }
 
-static void multi_stitch(string *p_line, 
+static void multi_stitch(string *p_line,
                          string *p_base, int limit, const char *delim)
 {
     string split;
@@ -61,39 +62,43 @@ static void multi_stitch(string *p_line,
 }
 
 /* match "a1f=0;" with "a0f=0;" */
-static bool match_multi_line(string *single, string *multi, int n)
+static bool match_multi_line(const format_item_t *single_item,
+                             string *multi, int n)
 {
     string intrm;
-    size_t pos;
-    if (multi->compare(*single) == 0) 
+
+    string single = single_item->line;
+    int refer = single_item->refer_count;
+    size_t pos = single.find('0');
+
+    /* the first time match */
+    if ((0 == refer || string::npos == pos)
+        && multi->compare(single) == 0)
     {
         return true;
     }
-    for (int i = 1; i < n; i++)
+    if (refer >= n || string::npos == pos)
     {
-        pos = single->find('0');
-        if (pos == string::npos) {
-            continue;
-        }
-        intrm = *single;
-        intrm.replace(pos, 1, to_string(i));
-        if (multi->compare(intrm) == 0)
-        {
-            return true;
-        }
-        /* match "a1=b1->h+func(0x10);" with "a0=b0->h+func(0x10);" */
-        intrm = *single;
-        if (multi->find('0') != string::npos)
-        {
-            replace_var_zore(&intrm, i);
-        }
-        else {
-            replace_num(&intrm, '0', i);
-        }
-        if (multi->compare(intrm) == 0)
-        {
-            return true;
-        }
+        return false;
+    }
+    intrm = single;
+    intrm.replace(pos, 1, to_string(refer));
+    if (multi->compare(intrm) == 0)
+    {
+        return true;
+    }
+    /* match "a1=b1->h+func(0x10);" with "a0=b0->h+func(0x10);" */
+    intrm = single;
+    if (multi->find('0') != string::npos)
+    {
+        replace_var_zore(&intrm, refer);
+    }
+    else {
+        replace_num(&intrm, '0', refer);
+    }
+    if (multi->compare(intrm) == 0)
+    {
+        return true;
     }
     return false;
 }
@@ -130,7 +135,7 @@ static bool match_multi_var(string *single, string *multi, int n)
         {
             ch = multi->c_str()[i + 1];
 
-            if (symbol.empty() && 
+            if (symbol.empty() &&
                 !IS_VAR(ch) && ch == multi->c_str()[i + 2]) // such as "&&"
             {
                 symbol.assign(multi->c_str() + i + 1, 2);
@@ -169,7 +174,7 @@ static bool match_multi_equal(string *single, string *multi, int n)
 
     for (size_t i = 0; i < multi->size(); i++)
     {
-        if ('=' == multi->c_str()[i]) 
+        if ('=' == multi->c_str()[i])
         {
             if (0 == offset) {
                 offset = i;
@@ -199,7 +204,7 @@ static bool match_multi_calc(string *single, string *multi, int n)
 {
     bool result = false;
     string intrm;
-    
+
     if (single->find("+=1") == string::npos &&
         single->find("-=1") == string::npos)
     {
@@ -256,13 +261,14 @@ static bool match_multi_func(const string *single, const string *multi, int n)
     return result;
 }
 
-bool varied_matching_rules(const char *single, const char *multi, int n)
+bool varied_matching_rules(const format_item_t *single,
+                           const char *multi, int n)
 {
     bool result = false;
-    string single_str = single;
+    string single_str = single->line;
     string multi_str = multi;
 
-    if (match_multi_line(&single_str, &multi_str, n)
+    if (match_multi_line(single, &multi_str, n)
         || match_multi_var(&single_str, &multi_str, n)
         || match_multi_equal(&single_str, &multi_str, n)
         || match_multi_calc(&single_str, &multi_str, n)
