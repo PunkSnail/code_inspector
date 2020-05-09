@@ -62,43 +62,40 @@ static void multi_stitch(string *p_line,
 }
 
 /* match "a1f=0;" with "a0f=0;" */
-static bool match_multi_line(const format_item_t *single_item,
-                             string *multi, int n)
+static bool match_multi_line(const format_item_t *item, string *multi)
 {
-    string intrm;
+    string single = item->line;
+    int refer = item->refer_count;
 
-    string single = single_item->line;
-    int refer = single_item->refer_count;
     size_t pos = single.find('0');
 
-    /* the first time match */
+    /* first match or no '0' in the string */
     if ((0 == refer || string::npos == pos)
         && multi->compare(single) == 0)
     {
         return true;
     }
-    if (refer >= n || string::npos == pos)
+    else if (string::npos != pos)
     {
-        return false;
-    }
-    intrm = single;
-    intrm.replace(pos, 1, to_string(refer));
-    if (multi->compare(intrm) == 0)
-    {
-        return true;
-    }
-    /* match "a1=b1->h+func(0x10);" with "a0=b0->h+func(0x10);" */
-    intrm = single;
-    if (multi->find('0') != string::npos)
-    {
-        replace_var_zore(&intrm, refer);
-    }
-    else {
-        replace_num(&intrm, '0', refer);
-    }
-    if (multi->compare(intrm) == 0)
-    {
-        return true;
+        single.replace(pos, 1, to_string(refer));
+
+        if (multi->compare(single) == 0)
+        {
+            return true;
+        }
+        /* match "a1=b1->h+func(0x10);" with "a0=b0->h+func(0x10);" */
+        single = item->line;
+        if (multi->find('0') != string::npos)
+        {
+            replace_var_zore(&single, refer);
+        }
+        else {
+            replace_num(&single, '0', refer);
+        }
+        if (multi->compare(single) == 0)
+        {
+            return true;
+        }
     }
     return false;
 }
@@ -268,7 +265,7 @@ bool varied_matching_rules(const format_item_t *single,
     string single_str = single->line;
     string multi_str = multi;
 
-    if (match_multi_line(single, &multi_str, n)
+    if (match_multi_line(single, &multi_str)
         || match_multi_var(&single_str, &multi_str, n)
         || match_multi_equal(&single_str, &multi_str, n)
         || match_multi_calc(&single_str, &multi_str, n)
