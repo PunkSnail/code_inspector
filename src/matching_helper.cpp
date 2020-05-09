@@ -18,7 +18,8 @@ static void replace_var_zore(string *p_line, int no)
         char ch1 = p_line->c_str()[i - 1];
         char ch2 = p_line->c_str()[i + 1];
 
-        if ('0' == p_line->c_str()[i] && IN_ALPHABET(ch1) && !IS_VAR(ch2))
+        if ('0' == p_line->c_str()[i] &&
+            IN_ALPHABET(ch1) && (!IS_VAR(ch2) || '_' == ch2))
         {
             p_line->replace(i, 1, to_string(no));
         }
@@ -77,12 +78,6 @@ static bool match_multi_line(const format_item_t *item, string *multi)
     }
     else if (string::npos != pos)
     {
-        single.replace(pos, 1, to_string(refer));
-
-        if (multi->compare(single) == 0)
-        {
-            return true;
-        }
         /* match "a1=b1->h+func(0x10);" with "a0=b0->h+func(0x10);" */
         single = item->line;
         if (multi->find('0') != string::npos)
